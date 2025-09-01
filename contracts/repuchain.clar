@@ -97,3 +97,92 @@
     active: bool, ;; Credential validity
   }
 )
+
+;; ADMINISTRATIVE FUNCTIONS
+
+;; Transfer protocol ownership to a new Bitcoin address
+(define-public (transfer-admin-rights (new-admin principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+    (asserts! (not (is-eq new-admin (var-get protocol-admin))) ERR_INVALID_INPUT)
+
+    (var-set protocol-admin new-admin)
+    (print {
+      event: "admin-transferred",
+      previous: tx-sender,
+      new: new-admin,
+      block: stacks-block-height,
+    })
+    (ok true)
+  )
+)
+
+;; Emergency protocol shutdown for critical security events
+(define-public (toggle-system-status (enabled bool))
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+
+    (var-set system-enabled enabled)
+    (print {
+      event: "system-status-changed",
+      enabled: enabled,
+      admin: tx-sender,
+      block: stacks-block-height,
+    })
+    (ok true)
+  )
+)
+
+;; Configure reputation decay mechanics for long-term sustainability
+(define-public (update-decay-parameters
+    (rate uint)
+    (interval uint)
+  )
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+    (asserts! (and (<= rate u50) (> rate u0)) ERR_INVALID_INPUT)
+    (asserts! (> interval u1000) ERR_INVALID_INPUT)
+
+    (var-set decay-percentage rate)
+    (var-set decay-interval-blocks interval)
+    (print {
+      event: "decay-updated",
+      rate: rate,
+      interval: interval,
+      effective: stacks-block-height,
+    })
+    (ok true)
+  )
+)
+
+;; REPUTATION ACTION MANAGEMENT
+
+;; Create new reputation-earning action for the Bitcoin ecosystem
+(define-public (create-reputation-action
+    (action-name (string-ascii 48))
+    (multiplier uint)
+    (description (string-ascii 120))
+  )
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+    (asserts! (> (len action-name) u0) ERR_INVALID_INPUT)
+    (asserts! (> (len description) u0) ERR_INVALID_INPUT)
+    (asserts!
+      (is-none (map-get? reputation-actions { action-name: action-name }))
+      ERR_ACTION_DUPLICATE
+    )
+    (asserts! (and (> multiplier u0) (<= multiplier u200)) ERR_INVALID_INPUT)
+
+    (map-set reputation-actions { action-name: action-name } {
+      score-multiplier: multiplier,
+      description: description,
+      enabled: true,
+    })
+    (print {
+      event: "action-created",
+      name: action-name,
+      multiplier: multiplier,
+    })
+    (ok true)
+  )
+)
