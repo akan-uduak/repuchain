@@ -469,3 +469,104 @@
     )
   )
 )
+
+;; CROSS-PLATFORM VERIFICATION SYSTEM
+
+;; Issue platform verification credential
+(define-public (issue-platform-credential
+    (platform (string-ascii 32))
+    (threshold uint)
+    (validity-blocks uint)
+  )
+  (let (
+      (user tx-sender)
+      (profile (unwrap! (map-get? reputation-profiles { account: user })
+        ERR_ACCOUNT_NOT_FOUND
+      ))
+      (current-score (get score profile))
+      (expiration (+ stacks-block-height validity-blocks))
+    )
+    (begin
+      (asserts! (var-get system-enabled) ERR_SYSTEM_INACTIVE)
+      (asserts! (get status profile) ERR_ACCESS_DENIED)
+      (asserts! (> (len platform) u0) ERR_INVALID_INPUT)
+      (asserts! (and (> validity-blocks u0) (<= validity-blocks u525600))
+        ERR_INVALID_INPUT
+      ) ;; Max ~1 year
+      (asserts! (>= current-score threshold) ERR_REPUTATION_TOO_LOW)
+      (asserts! (<= threshold REPUTATION_CEILING) ERR_INVALID_INPUT)
+
+      (map-set platform-credentials {
+        platform: platform,
+        account: user,
+      } {
+        required-threshold: threshold,
+        issued-at: stacks-block-height,
+        valid-until: expiration,
+        active: true,
+      })
+
+      (print {
+        event: "credential-issued",
+        platform: platform,
+        account: user,
+        threshold: threshold,
+        expires: expiration,
+      })
+
+      (ok true)
+    )
+  )
+)
+
+;; READ-ONLY QUERY FUNCTIONS
+
+;; Get current reputation score
+(define-read-only (get-reputation-score (account principal))
+  (match (map-get? reputation-profiles { account: account })
+    profile (some (get score profile))
+    none
+  )
+)
+
+;; Get complete reputation profile
+(define-read-only (get-full-profile (account principal))
+  (map-get? reputation-profiles { account: account })
+)
+
+;; Verify account meets minimum reputation threshold
+(define-read-only (verify-reputation-threshold
+    (account principal)
+    (min-threshold uint)
+  )
+  (match (map-get? reputation-profiles { account: account })
+    profile (if (and
+        (get status profile)
+        (>= (get score profile) min-threshold)
+      )
+      (some {
+        verified: true,
+        current-score: (get score profile),
+        threshold-met: min-threshold,
+      })
+      none
+    )
+    none
+  )
+)
+
+;; Get reputation action configuration
+(define-read-only (get-action-details (action-name (string-ascii 48)))
+  (map-get? reputation-actions { action-name: action-name })
+)
+
+;; Get historical reputation entry
+(define-read-only (get-reputation-history
+    (account principal)
+    (entry-id uint)
+  )
+  (map-get? reputation-ledger {
+    account: account,
+    entry-id: entry-id,
+  })
+)
