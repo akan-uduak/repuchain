@@ -570,3 +570,115 @@
     entry-id: entry-id,
   })
 )
+
+;; Get platform credential status
+(define-read-only (get-platform-credential
+    (platform (string-ascii 32))
+    (account principal)
+  )
+  (match (map-get? platform-credentials {
+    platform: platform,
+    account: account,
+  })
+    credential (if (and
+        (get active credential)
+        (> (get valid-until credential) stacks-block-height)
+      )
+      (some credential)
+      none
+    )
+    none
+  )
+)
+
+;; Get protocol configuration
+(define-read-only (get-protocol-config)
+  {
+    max-reputation: REPUTATION_CEILING,
+    min-reputation: REPUTATION_FLOOR,
+    starting-reputation: (var-get new-user-reputation),
+    decay-rate: (var-get decay-percentage),
+    decay-interval: (var-get decay-interval-blocks),
+    admin: (var-get protocol-admin),
+    active: (var-get system-enabled),
+    total-accounts: (var-get registered-accounts),
+    version: PROTOCOL_VERSION,
+  }
+)
+
+;; PROTOCOL INITIALIZATION
+
+;; Bootstrap essential Bitcoin ecosystem reputation actions
+(define-public (initialize-bitcoin-ecosystem)
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+
+    ;; Lightning Network Operations
+    (map-set reputation-actions { action-name: "lightning-channel-management" } {
+      score-multiplier: u12,
+      description: "Successfully managing Lightning Network payment channels and routing",
+      enabled: true,
+    })
+
+    ;; Bitcoin DeFi Participation
+    (map-set reputation-actions { action-name: "bitcoin-defi-interaction" } {
+      score-multiplier: u18,
+      description: "Active participation in Bitcoin DeFi protocols on Stacks blockchain",
+      enabled: true,
+    })
+
+    ;; Smart Contract Development
+    (map-set reputation-actions { action-name: "verified-contract-deployment" } {
+      score-multiplier: u25,
+      description: "Deployment and verification of Bitcoin smart contracts on Stacks",
+      enabled: true,
+    })
+
+    ;; Governance Participation
+    (map-set reputation-actions { action-name: "ecosystem-governance-vote" } {
+      score-multiplier: u8,
+      description: "Participation in Bitcoin and Stacks ecosystem governance decisions",
+      enabled: true,
+    })
+
+    ;; Cross-Chain Bridge Operations
+    (map-set reputation-actions { action-name: "cross-chain-bridge-usage" } {
+      score-multiplier: u15,
+      description: "Successful Bitcoin-Stacks bridge transactions and validations",
+      enabled: true,
+    })
+
+    ;; Security Contributions
+    (map-set reputation-actions { action-name: "security-audit-contribution" } {
+      score-multiplier: u30,
+      description: "Security auditing and responsible vulnerability disclosure",
+      enabled: true,
+    })
+
+    (print {
+      event: "ecosystem-initialized",
+      actions-created: u6,
+      initialization-block: stacks-block-height,
+      bitcoin-anchor: burn-block-height,
+    })
+
+    (ok true)
+  )
+)
+
+;; Initialize the ecosystem on deployment
+(initialize-bitcoin-ecosystem)
+;; Emit deployment event
+(print {
+  event: "repuchain-deployed",
+  version: PROTOCOL_VERSION,
+  deployment-block: stacks-block-height,
+  bitcoin-block: burn-block-height,
+  admin: (var-get protocol-admin),
+  configuration: {
+    max-reputation: REPUTATION_CEILING,
+    starting-reputation: (var-get new-user-reputation),
+    decay-rate: (var-get decay-percentage),
+    decay-interval: (var-get decay-interval-blocks),
+  },
+})
