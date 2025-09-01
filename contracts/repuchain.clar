@@ -186,3 +186,95 @@
     (ok true)
   )
 )
+
+;; Update existing reputation action parameters
+(define-public (update-reputation-action
+    (action-name (string-ascii 48))
+    (multiplier uint)
+    (description (string-ascii 120))
+    (enabled bool)
+  )
+  (begin
+    (asserts! (is-eq tx-sender (var-get protocol-admin)) ERR_ADMIN_REQUIRED)
+    (asserts! (> (len action-name) u0) ERR_INVALID_INPUT)
+    (asserts! (> (len description) u0) ERR_INVALID_INPUT)
+    (asserts!
+      (is-some (map-get? reputation-actions { action-name: action-name }))
+      ERR_ACTION_MISSING
+    )
+    (asserts! (and (> multiplier u0) (<= multiplier u200)) ERR_INVALID_INPUT)
+
+    (map-set reputation-actions { action-name: action-name } {
+      score-multiplier: multiplier,
+      description: description,
+      enabled: enabled,
+    })
+    (print {
+      event: "action-updated",
+      name: action-name,
+      enabled: enabled,
+    })
+    (ok true)
+  )
+)
+
+;; INTERNAL UTILITY FUNCTIONS
+
+;; Validate account ownership and existence
+(define-private (validate-account-access (account principal))
+  (and
+    (is-some (map-get? reputation-profiles { account: account }))
+    (is-eq account tx-sender)
+  )
+)
+
+;; Record reputation changes in the immutable audit ledger
+(define-private (log-reputation-change
+    (account principal)
+    (action-name (string-ascii 48))
+    (old-score uint)
+    (new-score uint)
+  )
+  (let ((entry-id stacks-block-height))
+    (map-set reputation-ledger {
+      account: account,
+      entry-id: entry-id,
+    } {
+      action-performed: action-name,
+      score-before: old-score,
+      score-after: new-score,
+      bitcoin-block: burn-block-height,
+      stacks-block: entry-id,
+    })
+    (print {
+      event: "reputation-logged",
+      account: account,
+      action: action-name,
+      delta: (if (>= new-score old-score)
+        (- new-score old-score)
+        (- old-score new-score)
+      ),
+      total: new-score,
+    })
+  )
+)
+
+;; Get action multiplier with safe fallback
+(define-private (get-action-multiplier (action-name (string-ascii 48)))
+  (default-to u0
+    (get score-multiplier
+      (map-get? reputation-actions { action-name: action-name })
+    ))
+)
+
+;; Check if reputation action is currently enabled
+(define-private (is-action-enabled (action-name (string-ascii 48)))
+  (default-to false
+    (get enabled (map-get? reputation-actions { action-name: action-name }))
+  )
+)
+
+;; Determine if decay should be applied based on time elapsed
+(define-private (needs-decay-application (last-decay uint))
+  (>= (- stacks-block-height last-decay) (var-get decay-interval-blocks))
+)
