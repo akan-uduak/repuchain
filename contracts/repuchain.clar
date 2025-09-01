@@ -278,3 +278,99 @@
 (define-private (needs-decay-application (last-decay uint))
   (>= (- stacks-block-height last-decay) (var-get decay-interval-blocks))
 )
+
+;; REPUTATION PROFILE MANAGEMENT
+
+;; Create new Bitcoin-secured reputation profile
+(define-public (create-reputation-profile (identifier (string-ascii 64)))
+  (let (
+      (user tx-sender)
+      (current-block stacks-block-height)
+      (starting-score (var-get new-user-reputation))
+    )
+    (begin
+      (asserts! (var-get system-enabled) ERR_SYSTEM_INACTIVE)
+      (asserts! (is-none (map-get? reputation-profiles { account: user }))
+        ERR_ACCOUNT_EXISTS
+      )
+      (asserts! (>= (len identifier) MIN_IDENTIFIER_LENGTH) ERR_INVALID_INPUT)
+
+      (map-set reputation-profiles { account: user } {
+        identifier: identifier,
+        score: starting-score,
+        established: current-block,
+        last-activity: current-block,
+        last-decay-applied: current-block,
+        verified-actions: u0,
+        status: true,
+      })
+
+      (var-set registered-accounts (+ (var-get registered-accounts) u1))
+
+      (print {
+        event: "profile-created",
+        account: user,
+        identifier: identifier,
+        initial-score: starting-score,
+        bitcoin-anchor: burn-block-height,
+      })
+
+      (ok identifier)
+    )
+  )
+)
+
+;; Update profile status (activate/deactivate)
+(define-public (update-profile-status (active bool))
+  (let (
+      (user tx-sender)
+      (current-profile (unwrap! (map-get? reputation-profiles { account: user })
+        ERR_ACCOUNT_NOT_FOUND
+      ))
+    )
+    (begin
+      (map-set reputation-profiles { account: user }
+        (merge current-profile {
+          status: active,
+          last-activity: stacks-block-height,
+        })
+      )
+
+      (print {
+        event: "profile-status-updated",
+        account: user,
+        active: active,
+      })
+
+      (ok true)
+    )
+  )
+)
+
+;; REPUTATION SCORING ENGINE
+
+;; Execute reputation-earning action and update score
+(define-public (perform-reputation-action (action-name (string-ascii 48)))
+  (let (
+      (user tx-sender)
+      (profile (unwrap! (map-get? reputation-profiles { account: user })
+        ERR_ACCOUNT_NOT_FOUND
+      ))
+      (current-score (get score profile))
+      (multiplier (get-action-multiplier action-name))
+      (action-count (+ (get verified-actions profile) u1))
+    )
+    (begin
+      (asserts! (var-get system-enabled) ERR_SYSTEM_INACTIVE)
+      (asserts! (get status profile) ERR_ACCESS_DENIED)
+      (asserts!
+        (is-some (map-get? reputation-actions { action-name: action-name }))
+        ERR_INVALID_INPUT
+      )
+      (asserts! (is-action-enabled action-name) ERR_INVALID_INPUT)
+
+      ;; Apply decay if needed before calculating new score
+      (if (needs-decay-application (get last-decay-applied profile))
+        (apply-reputation-decay-internal user)
+        true
+      )
