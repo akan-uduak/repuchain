@@ -374,3 +374,98 @@
         (apply-reputation-decay-internal user)
         true
       )
+
+      ;; Calculate new reputation score
+      (let (
+          (updated-profile (unwrap! (map-get? reputation-profiles { account: user })
+            ERR_ACCOUNT_NOT_FOUND
+          ))
+          (decayed-score (get score updated-profile))
+          (new-score (if (< (+ decayed-score multiplier) REPUTATION_CEILING)
+            (+ decayed-score multiplier)
+            REPUTATION_CEILING
+          ))
+        )
+        (begin
+          (map-set reputation-profiles { account: user }
+            (merge updated-profile {
+              score: new-score,
+              last-activity: stacks-block-height,
+              verified-actions: action-count,
+            })
+          )
+
+          (log-reputation-change user action-name decayed-score new-score)
+
+          (ok new-score)
+        )
+      )
+    )
+  )
+)
+
+;; Internal decay application function
+(define-private (apply-reputation-decay-internal (account principal))
+  (let (
+      (profile (default-to {
+        identifier: "",
+        score: u0,
+        established: u0,
+        last-activity: u0,
+        last-decay-applied: u0,
+        verified-actions: u0,
+        status: false,
+      }
+        (map-get? reputation-profiles { account: account })
+      ))
+      (current-score (get score profile))
+      (decay-amount (/ (* current-score (var-get decay-percentage)) u100))
+      (new-score (if (> current-score decay-amount)
+        (- current-score decay-amount)
+        REPUTATION_FLOOR
+      ))
+    )
+    (begin
+      (map-set reputation-profiles { account: account }
+        (merge profile {
+          score: new-score,
+          last-activity: stacks-block-height,
+          last-decay-applied: stacks-block-height,
+        })
+      )
+
+      (log-reputation-change account "reputation-decay" current-score new-score)
+
+      true
+    )
+  )
+)
+
+;; Public decay application function
+(define-public (apply-reputation-decay)
+  (let (
+      (user tx-sender)
+      (profile (unwrap! (map-get? reputation-profiles { account: user })
+        ERR_ACCOUNT_NOT_FOUND
+      ))
+    )
+    (begin
+      (asserts! (var-get system-enabled) ERR_SYSTEM_INACTIVE)
+      (asserts! (get status profile) ERR_ACCESS_DENIED)
+      (asserts! (needs-decay-application (get last-decay-applied profile))
+        ERR_INVALID_INPUT
+      )
+
+      (apply-reputation-decay-internal user)
+
+      (let (
+          (updated-profile (unwrap! (map-get? reputation-profiles { account: user })
+            ERR_ACCOUNT_NOT_FOUND
+          ))
+          (final-score (get score updated-profile))
+        )
+        (ok final-score)
+      )
+    )
+  )
+)
